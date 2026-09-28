@@ -72,6 +72,149 @@ public class AccountService {
         return ResultCode.SUCCESS;
     }
 
+    // ================= Đăng nhập =================
+    public ResultCode login(String username, String password) {
+        // BR-LOG-01
+        if (isBlank(username) || isBlank(password)) {
+            return ResultCode.INVALID_INPUT;
+        }
+        // BR-LOG-02, 03 (user không tồn tại)
+        Account account = accountsByUsername.get(key(username));
+        if (account == null) {
+            return ResultCode.INVALID_CREDENTIALS;
+        }
+        // BR-LOG-04
+        if (account.getStatus() == AccountStatus.DISABLED) {
+            return ResultCode.ACCOUNT_DISABLED;
+        }
+        // BR-LOG-06: đang khóa -> từ chối, không tăng bộ đếm
+        if (account.isLocked()) {
+            return ResultCode.ACCOUNT_LOCKED;
+        }
+        // BR-LOG-03, 05: sai mật khẩu
+        if (!PasswordHasher.matches(account.getSalt(), password, account.getCurrentPasswordHash())) {
+            account.incrementFailedAttempts();
+            if (account.getFailedAttempts() >= MAX_FAILED_ATTEMPTS) {
+                account.lock();
+                return ResultCode.ACCOUNT_LOCKED;
+            }
+            return ResultCode.INVALID_CREDENTIALS;
+        }
+        // BR-LOG-08
+        account.resetFailedAttempts();
+        return ResultCode.SUCCESS;
+    }
+
+    // ================= Đổi mật khẩu (BONUS) =================
+    public ResultCode changePassword(String username, String oldPassword,
+                                     String newPassword, String confirmPassword) {
+        // BR-CHG-01
+        if (isBlank(username) || isBlank(oldPassword) || isBlank(newPassword) || isBlank(confirmPassword)) {
+            return ResultCode.INVALID_INPUT;
+        }
+        // BR-CHG-02
+        Account account = accountsByUsername.get(key(username));
+        if (account == null) {
+            return ResultCode.USER_NOT_FOUND;
+        }
+        if (account.getStatus() == AccountStatus.DISABLED) {
+            return ResultCode.ACCOUNT_DISABLED;
+        }
+        // BR-CHG-03 (không đụng tới failedAttempts)
+        if (!PasswordHasher.matches(account.getSalt(), oldPassword, account.getCurrentPasswordHash())) {
+            return ResultCode.OLD_PASSWORD_INCORRECT;
+        }
+        // BR-CHG-04..07
+        ResultCode check = validateNewPassword(account, newPassword, confirmPassword);
+        if (!check.isSuccess()) {
+            return check;
+        }
+        // BR-CHG-08
+        account.changePasswordHash(PasswordHasher.hash(account.getSalt(), newPassword), PASSWORD_HISTORY_SIZE);
+        return ResultCode.SUCCESS;
+    }
+
+    // ================= Quên / đặt lại mật khẩu (BONUS) =================
+    public TokenResult requestPasswordReset(String email) {
+        // BR-RST-01
+        if (isBlank(email)) {
+            return new TokenResult(ResultCode.INVALID_INPUT, null);
+        }
+        String userKey = usernameByEmail.get(key(email));
+        if (userKey == null) {
+            return new TokenResult(ResultCode.USER_NOT_FOUND, null);
+        }
+        if (accountsByUsername.get(userKey).getStatus() == AccountStatus.DISABLED) {
+            return new TokenResult(ResultCode.ACCOUNT_DISABLED, null);
+        }
+        // BR-RST-03: yêu cầu mới vô hiệu token cũ
+        String oldToken = tokenByUsername.remove(userKey);
+        if (oldToken != null) {
+            usernameByToken.remove(oldToken);
+        }
+        String token = UUID.randomUUID().toString();
+        usernameByToken.put(token, userKey);
+        tokenByUsername.put(userKey, token);
+        return new TokenResult(ResultCode.SUCCESS, token);
+    }
+
+    public ResultCode resetPassword(String token, String newPassword, String confirmPassword) {
+        // BR-RST-04: input -> token tồn tại
+        if (isBlank(token) || isBlank(newPassword) || isBlank(confirmPassword)) {
+            return ResultCode.INVALID_INPUT;
+        }
+        String userKey = usernameByToken.get(token);
+        if (userKey == null) {
+            return ResultCode.INVALID_TOKEN;
+        }
+        Account account = accountsByUsername.get(userKey);
+        // BR-RST-05: lỗi mật khẩu mới -> token vẫn còn
+        ResultCode check = validateNewPassword(account, newPassword, confirmPassword);
+        if (!check.isSuccess()) {
+            return check;
+        }
+        // BR-RST-06
+        account.changePasswordHash(PasswordHasher.hash(account.getSalt(), newPassword), PASSWORD_HISTORY_SIZE);
+        account.unlock();
+        usernameByToken.remove(token);
+        tokenByUsername.remove(userKey);
+        return ResultCode.SUCCESS;
+    }
+
+    // ================= Quản trị & truy vấn =================
+    public ResultCode disableAccount(String username) {
+        Optional<Account> account = findByUsername(username);
+        if (account.isEmpty()) {
+            return ResultCode.USER_NOT_FOUND;
+        }
+        account.get().setStatus(AccountStatus.DISABLED);
+        return ResultCode.SUCCESS;
+    }
+
+
+    public boolean isLocked(String username) {
+        return findByUsername(username).map(Account::isLocked).orElse(false);
+    }
+
+    // ================= Helpers =================
+    /** Dùng chung cho changePassword và resetPassword: CHG-04 -> 05 -> 06 -> 07. */
+    private ResultCode validateNewPassword(Account account, String newPassword, String confirmPassword) {
+        if (!AccountValidator.isValidPassword(newPassword, account.getUsername())) {
+            return ResultCode.WEAK_PASSWORD;
+        }
+        if (!newPassword.equals(confirmPassword)) {
+            return ResultCode.PASSWORD_MISMATCH;
+        }
+        String newHash = PasswordHasher.hash(account.getSalt(), newPassword);
+        if (newHash.equals(account.getCurrentPasswordHash())) {
+            return ResultCode.SAME_AS_OLD_PASSWORD;
+        }
+        if (account.getPasswordHistory().contains(newHash)) {
+            return ResultCode.PASSWORD_REUSED;
+        }
+        return ResultCode.SUCCESS;
+    }
+
     private static boolean isBlank(String s) {
         return s == null || s.isBlank();
     }
@@ -86,7 +229,5 @@ public class AccountService {
         return Optional.ofNullable(accountsByUsername.get(key(username)));
     }
 
-    public boolean isLocked(String username) {
-        return findByUsername(username).map(Account::isLocked).orElse(false);
-    }
+
 }
