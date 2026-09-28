@@ -28,6 +28,7 @@ class AccountServiceTest {
     static final String USER = "alice_01";
     static final String EMAIL = "alice@example.com";
     static final String PASS = "Secret@123";
+    static final String WRONG = "Wrong@123";
     static final LocalDate DOB = LocalDate.of(2000, 1, 15);
     static final String PHONE = "0912345678";
 
@@ -45,20 +46,18 @@ class AccountServiceTest {
     void registerDefault() {
         assertEquals(
                 ResultCode.SUCCESS,
-                service.register(
-                        USER,
-                        EMAIL,
-                        PASS,
-                        PASS,
-                        DOB,
-                        PHONE
-                )
+                service.register(USER, EMAIL, PASS, PASS, DOB, PHONE)
         );
     }
 
     Account account() {
-        return service.findByUsername(USER)
-                .orElseThrow();
+        return service.findByUsername(USER).orElseThrow();
+    }
+
+    void failLogin(int times) {
+        for (int i = 0; i < times; i++) {
+            service.login(USER, WRONG);
+        }
     }
 
     // =========================================================
@@ -69,22 +68,10 @@ class AccountServiceTest {
     @DisplayName("register()")
     class Register {
 
-        // -----------------------------------------------------
-        // REG-10: đăng ký thành công
-        // -----------------------------------------------------
-
         @Test
         void register_ValidData_CreatesActiveAccountWithHashedPassword() {
-
             ResultCode result =
-                    service.register(
-                            USER,
-                            EMAIL,
-                            PASS,
-                            PASS,
-                            DOB,
-                            PHONE
-                    );
+                    service.register(USER, EMAIL, PASS, PASS, DOB, PHONE);
 
             assertEquals(ResultCode.SUCCESS, result);
 
@@ -93,33 +80,13 @@ class AccountServiceTest {
             assertEquals(AccountStatus.ACTIVE, acc.getStatus());
             assertEquals(0, acc.getFailedAttempts());
             assertFalse(acc.isLocked());
-
-            // Không lưu password dạng plaintext
-            assertNotEquals(
-                    PASS,
-                    acc.getCurrentPasswordHash()
-            );
-
-            // SHA-256 dạng hex = 64 ký tự
-            assertEquals(
-                    64,
-                    acc.getCurrentPasswordHash().length()
-            );
-
-            // Khi mới đăng ký chỉ có 1 password trong history
-            assertEquals(
-                    1,
-                    acc.getPasswordHistory().size()
-            );
+            assertNotEquals(PASS, acc.getCurrentPasswordHash());
+            assertEquals(64, acc.getCurrentPasswordHash().length());
+            assertEquals(1, acc.getPasswordHistory().size());
         }
-
-        // -----------------------------------------------------
-        // Email lưu lowercase
-        // -----------------------------------------------------
 
         @Test
         void register_UpperCaseEmail_StoredAsLowerCase() {
-
             ResultCode result =
                     service.register(
                             USER,
@@ -131,20 +98,11 @@ class AccountServiceTest {
                     );
 
             assertEquals(ResultCode.SUCCESS, result);
-
-            assertEquals(
-                    "alice@example.com",
-                    account().getEmail()
-            );
+            assertEquals("alice@example.com", account().getEmail());
         }
-
-        // -----------------------------------------------------
-        // Mỗi account phải có salt riêng
-        // -----------------------------------------------------
 
         @Test
         void register_TwoAccountsSamePassword_HaveDifferentSaltAndHash() {
-
             registerDefault();
 
             assertEquals(
@@ -160,25 +118,14 @@ class AccountServiceTest {
             );
 
             Account alice = account();
+            Account bob = service.findByUsername("bob_02").orElseThrow();
 
-            Account bob =
-                    service.findByUsername("bob_02")
-                            .orElseThrow();
-
-            assertNotEquals(
-                    alice.getSalt(),
-                    bob.getSalt()
-            );
-
+            assertNotEquals(alice.getSalt(), bob.getSalt());
             assertNotEquals(
                     alice.getCurrentPasswordHash(),
                     bob.getCurrentPasswordHash()
             );
         }
-
-        // -----------------------------------------------------
-        // REG-01 .. REG-09 + priority
-        // -----------------------------------------------------
 
         @ParameterizedTest(name = "[{index}] {0}")
         @MethodSource("AccountServiceTest#invalidRegisterInputs")
@@ -192,7 +139,6 @@ class AccountServiceTest {
                 String phone,
                 ResultCode expected
         ) {
-
             ResultCode result =
                     service.register(
                             username,
@@ -213,19 +159,12 @@ class AccountServiceTest {
             }
         }
 
-        // -----------------------------------------------------
-        // REG-01: username null / empty / blank
-        // -----------------------------------------------------
-
-        @ParameterizedTest(
-                name = "[{index}] username = \"{0}\""
-        )
+        @ParameterizedTest(name = "[{index}] username = \"{0}\"")
         @NullAndEmptySource
         @ValueSource(strings = {" ", "   "})
         void register_UsernameNullEmptyBlank_ReturnsInvalidInput(
                 String username
         ) {
-
             assertEquals(
                     ResultCode.INVALID_INPUT,
                     service.register(
@@ -239,19 +178,12 @@ class AccountServiceTest {
             );
         }
 
-        // -----------------------------------------------------
-        // REG-01: email null / empty / blank
-        // -----------------------------------------------------
-
-        @ParameterizedTest(
-                name = "[{index}] email = \"{0}\""
-        )
+        @ParameterizedTest(name = "[{index}] email = \"{0}\"")
         @NullAndEmptySource
         @ValueSource(strings = {" ", "   "})
         void register_EmailNullEmptyBlank_ReturnsInvalidInput(
                 String email
         ) {
-
             assertEquals(
                     ResultCode.INVALID_INPUT,
                     service.register(
@@ -265,19 +197,12 @@ class AccountServiceTest {
             );
         }
 
-        // -----------------------------------------------------
-        // REG-01: password / confirm null / empty / blank
-        // -----------------------------------------------------
-
-        @ParameterizedTest(
-                name = "[{index}] password = \"{0}\""
-        )
+        @ParameterizedTest(name = "[{index}] password = \"{0}\"")
         @NullAndEmptySource
         @ValueSource(strings = {" ", "   "})
         void register_PasswordNullEmptyBlank_ReturnsInvalidInput(
                 String password
         ) {
-
             assertEquals(
                     ResultCode.INVALID_INPUT,
                     service.register(
@@ -303,18 +228,11 @@ class AccountServiceTest {
             );
         }
 
-        // -----------------------------------------------------
-        // REG-09: phone optional
-        // -----------------------------------------------------
-
-        @ParameterizedTest(
-                name = "[{index}] phone = \"{0}\""
-        )
+        @ParameterizedTest(name = "[{index}] phone = \"{0}\"")
         @NullAndEmptySource
         void register_PhoneNullOrEmpty_Success(
                 String phone
         ) {
-
             assertEquals(
                     ResultCode.SUCCESS,
                     service.register(
@@ -328,13 +246,7 @@ class AccountServiceTest {
             );
         }
 
-        // -----------------------------------------------------
-        // REG-03: duplicate username ignore case
-        // -----------------------------------------------------
-
-        @ParameterizedTest(
-                name = "[{index}] duplicate username = \"{0}\""
-        )
+        @ParameterizedTest(name = "[{index}] duplicate username = \"{0}\"")
         @ValueSource(strings = {
                 "alice_01",
                 "ALICE_01",
@@ -343,7 +255,6 @@ class AccountServiceTest {
         void register_DuplicateUsernameIgnoreCase_ReturnsDuplicateUsername(
                 String username
         ) {
-
             registerDefault();
 
             assertEquals(
@@ -359,13 +270,7 @@ class AccountServiceTest {
             );
         }
 
-        // -----------------------------------------------------
-        // REG-05: duplicate email ignore case
-        // -----------------------------------------------------
-
-        @ParameterizedTest(
-                name = "[{index}] duplicate email = \"{0}\""
-        )
+        @ParameterizedTest(name = "[{index}] duplicate email = \"{0}\"")
         @ValueSource(strings = {
                 "alice@example.com",
                 "ALICE@EXAMPLE.COM",
@@ -374,7 +279,6 @@ class AccountServiceTest {
         void register_DuplicateEmailIgnoreCase_ReturnsDuplicateEmail(
                 String email
         ) {
-
             registerDefault();
 
             assertEquals(
@@ -389,14 +293,8 @@ class AccountServiceTest {
                     )
             );
 
-            assertTrue(
-                    service.findByUsername("bob_02").isEmpty()
-            );
+            assertTrue(service.findByUsername("bob_02").isEmpty());
         }
-
-        // -----------------------------------------------------
-        // REG-08: boundary tuổi
-        // -----------------------------------------------------
 
         @ParameterizedTest(
                 name = "[{index}] today - {0} years + {1} days -> {2}"
@@ -413,7 +311,6 @@ class AccountServiceTest {
                 int plusDays,
                 ResultCode expected
         ) {
-
             LocalDate dob =
                     LocalDate.now()
                             .minusYears(yearsAgo)
@@ -432,14 +329,8 @@ class AccountServiceTest {
             );
         }
 
-        // -----------------------------------------------------
-        // Priority:
-        // INVALID_EMAIL phải được kiểm tra trước duplicate username
-        // -----------------------------------------------------
-
         @Test
         void register_DuplicateUsernameButInvalidEmail_ReturnsInvalidEmailFirst() {
-
             registerDefault();
 
             assertEquals(
@@ -457,17 +348,277 @@ class AccountServiceTest {
     }
 
     // =========================================================
+    // Login - TODO 7
+    // =========================================================
+
+    @Nested
+    @DisplayName("login()")
+    class Login {
+
+        @BeforeEach
+        void prepareUser() {
+            registerDefault();
+        }
+
+        @Test
+        void login_CorrectCredentials_Success() {
+            ResultCode result = service.login(USER, PASS);
+
+            assertEquals(ResultCode.SUCCESS, result);
+            assertEquals(0, account().getFailedAttempts());
+            assertFalse(account().isLocked());
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {
+                "Secret@123",
+                "Wrong@123"
+        })
+        void login_UnknownUserAndAnyPassword_ReturnsInvalidCredentials(
+                String password
+        ) {
+            assertEquals(
+                    ResultCode.INVALID_CREDENTIALS,
+                    service.login("unknown_user", password)
+            );
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {
+                "Secret@123",
+                "Wrong@123"
+        })
+        void login_DisabledAccount_ReturnsAccountDisabled(
+                String password
+        ) {
+            assertEquals(
+                    ResultCode.SUCCESS,
+                    service.disableAccount(USER)
+            );
+
+            assertEquals(
+                    ResultCode.ACCOUNT_DISABLED,
+                    service.login(USER, password)
+            );
+        }
+
+        @ParameterizedTest(name = "[{index}] sai {0} lần")
+        @ValueSource(ints = {
+                1,
+                2,
+                3,
+                4
+        })
+        void login_WrongPasswordLessThan5Times_IncrementsCounter(
+                int attempts
+        ) {
+            for (int i = 1; i <= attempts; i++) {
+                assertEquals(
+                        ResultCode.INVALID_CREDENTIALS,
+                        service.login(USER, WRONG)
+                );
+            }
+
+            assertEquals(
+                    attempts,
+                    account().getFailedAttempts()
+            );
+
+            assertFalse(account().isLocked());
+        }
+
+        @Test
+        void login_WrongPassword5thTime_LocksAccount() {
+            failLogin(4);
+
+            assertFalse(account().isLocked());
+            assertEquals(4, account().getFailedAttempts());
+
+            assertEquals(
+                    ResultCode.ACCOUNT_LOCKED,
+                    service.login(USER, WRONG)
+            );
+
+            assertTrue(account().isLocked());
+            assertEquals(5, account().getFailedAttempts());
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {
+                "Secret@123",
+                "Wrong@123"
+        })
+        void login_WhileLocked_RejectsWithoutIncrement(
+                String password
+        ) {
+            failLogin(5);
+
+            assertTrue(account().isLocked());
+            assertEquals(5, account().getFailedAttempts());
+
+            assertEquals(
+                    ResultCode.ACCOUNT_LOCKED,
+                    service.login(USER, password)
+            );
+
+            assertEquals(
+                    5,
+                    account().getFailedAttempts()
+            );
+        }
+
+        @ParameterizedTest(
+                name = "[{index}] sau {0} lần sai -> {1}, locked={2}"
+        )
+        @CsvSource({
+                "4, SUCCESS,        false",
+                "5, ACCOUNT_LOCKED, true",
+                "6, ACCOUNT_LOCKED, true"
+        })
+        void login_CorrectPasswordAfterNFailures(
+                int failures,
+                ResultCode expected,
+                boolean expectedLocked
+        ) {
+            failLogin(failures);
+
+            ResultCode result =
+                    service.login(USER, PASS);
+
+            assertEquals(expected, result);
+            assertEquals(
+                    expectedLocked,
+                    service.isLocked(USER)
+            );
+        }
+
+        @Test
+        void login_SuccessAfterFailures_ResetsCounter() {
+            failLogin(3);
+
+            assertEquals(3, account().getFailedAttempts());
+
+            assertEquals(
+                    ResultCode.SUCCESS,
+                    service.login(USER, PASS)
+            );
+
+            assertEquals(
+                    0,
+                    account().getFailedAttempts()
+            );
+
+            assertFalse(account().isLocked());
+        }
+
+        @Test
+        void login_AfterAdminUnlock_CounterRestartsAndCanLogin() {
+            failLogin(5);
+
+            assertTrue(service.isLocked(USER));
+            assertEquals(5, account().getFailedAttempts());
+
+            assertEquals(
+                    ResultCode.SUCCESS,
+                    service.unlockAccount(USER)
+            );
+
+            assertFalse(service.isLocked(USER));
+            assertEquals(0, account().getFailedAttempts());
+
+            assertEquals(
+                    ResultCode.INVALID_CREDENTIALS,
+                    service.login(USER, WRONG)
+            );
+
+            assertEquals(
+                    1,
+                    account().getFailedAttempts()
+            );
+
+            assertEquals(
+                    ResultCode.SUCCESS,
+                    service.login(USER, PASS)
+            );
+
+            assertEquals(
+                    0,
+                    account().getFailedAttempts()
+            );
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {
+                "alice_01",
+                "ALICE_01",
+                "Alice_01"
+        })
+        void login_UsernameIgnoreCase_Success(
+                String username
+        ) {
+            assertEquals(
+                    ResultCode.SUCCESS,
+                    service.login(username, PASS)
+            );
+        }
+
+        @Test
+        void login_PasswordCaseSensitive_ReturnsInvalidCredentials() {
+            assertEquals(
+                    ResultCode.INVALID_CREDENTIALS,
+                    service.login(
+                            USER,
+                            "secret@123"
+                    )
+            );
+
+            assertEquals(
+                    1,
+                    account().getFailedAttempts()
+            );
+        }
+
+        @ParameterizedTest
+        @NullAndEmptySource
+        @ValueSource(strings = {
+                " ",
+                "   "
+        })
+        void login_UsernameNullEmptyBlank_ReturnsInvalidInput(
+                String username
+        ) {
+            assertEquals(
+                    ResultCode.INVALID_INPUT,
+                    service.login(username, PASS)
+            );
+        }
+
+        @ParameterizedTest
+        @NullAndEmptySource
+        @ValueSource(strings = {
+                " ",
+                "   "
+        })
+        void login_PasswordNullEmptyBlank_ReturnsInvalidInput(
+                String password
+        ) {
+            assertEquals(
+                    ResultCode.INVALID_INPUT,
+                    service.login(USER, password)
+            );
+        }
+    }
+
+    // =========================================================
     // MethodSource
     // =========================================================
 
     static Stream<Arguments> invalidRegisterInputs() {
-
         LocalDate childDob =
                 LocalDate.now().minusYears(10);
 
         return Stream.of(
 
-                // REG-01
                 Arguments.of(
                         "DOB null",
                         USER,
@@ -490,7 +641,6 @@ class AccountServiceTest {
                         ResultCode.INVALID_INPUT
                 ),
 
-                // REG-02
                 Arguments.of(
                         "username sai định dạng",
                         "1alice",
@@ -502,7 +652,6 @@ class AccountServiceTest {
                         ResultCode.INVALID_USERNAME
                 ),
 
-                // REG-04
                 Arguments.of(
                         "email sai định dạng",
                         USER,
@@ -514,7 +663,6 @@ class AccountServiceTest {
                         ResultCode.INVALID_EMAIL
                 ),
 
-                // REG-06
                 Arguments.of(
                         "password yếu",
                         USER,
@@ -526,7 +674,6 @@ class AccountServiceTest {
                         ResultCode.WEAK_PASSWORD
                 ),
 
-                // REG-07
                 Arguments.of(
                         "confirm password không khớp",
                         USER,
@@ -538,7 +685,6 @@ class AccountServiceTest {
                         ResultCode.PASSWORD_MISMATCH
                 ),
 
-                // REG-08
                 Arguments.of(
                         "chưa đủ 18 tuổi",
                         USER,
@@ -550,7 +696,6 @@ class AccountServiceTest {
                         ResultCode.UNDERAGE
                 ),
 
-                // REG-09
                 Arguments.of(
                         "phone sai định dạng",
                         USER,
@@ -561,10 +706,6 @@ class AccountServiceTest {
                         "123456",
                         ResultCode.INVALID_PHONE
                 ),
-
-                // =================================================
-                // Priority tests
-                // =================================================
 
                 Arguments.of(
                         "username sai + email sai -> username thắng",
